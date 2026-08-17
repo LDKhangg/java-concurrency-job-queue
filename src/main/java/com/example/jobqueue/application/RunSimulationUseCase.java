@@ -1,5 +1,6 @@
 package com.example.jobqueue.application;
 
+import com.example.jobqueue.controller.dto.SimulationMode;
 import com.example.jobqueue.controller.dto.SimulationRequest;
 import com.example.jobqueue.controller.dto.SimulationResponse;
 import com.example.jobqueue.domain.Job;
@@ -17,31 +18,50 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class RunSimulationUseCase {
 
 	private final SubmitJobUseCase submitJobUseCase;
+	private final JobProcessingService jobProcessingService;
 	private final InMemoryJobRepository jobRepository;
 
-	public RunSimulationUseCase(SubmitJobUseCase submitJobUseCase, InMemoryJobRepository jobRepository) {
+	public RunSimulationUseCase(
+		SubmitJobUseCase submitJobUseCase,
+		JobProcessingService jobProcessingService,
+		InMemoryJobRepository jobRepository
+	) {
 		this.submitJobUseCase = submitJobUseCase;
+		this.jobProcessingService = jobProcessingService;
 		this.jobRepository = jobRepository;
 	}
 
 	public SimulationResponse handle(SimulationRequest request) {
 		int totalJobs = request.producerCount() * request.jobsPerProducer();
+		int producerDelayMs = request.mode() == SimulationMode.BURST ? 0 : request.producerDelayMs();
 		ConcurrentLinkedQueue<String> submittedJobIds = new ConcurrentLinkedQueue<>();
+		AtomicInteger rejectedCount = new AtomicInteger();
+
 		ExecutorService producers = Executors.newFixedThreadPool(Math.max(1, request.producerCount()));
 		CountDownLatch finishedProducers = new CountDownLatch(request.producerCount());
+		long startedAt = System.nanoTime();
+
+		BacklogSampler backlogSampler = new BacklogSampler();
+		backlogSampler.start();
 
 		for (int producerIndex = 0; producerIndex < request.producerCount(); producerIndex++) {
 			producers.submit(() -> {
 				try {
 					for (int jobIndex = 0; jobIndex < request.jobsPerProducer(); jobIndex++) {
-						Job job = submitJobUseCase.handle("simulation", request.workerDelayMs());
-						submittedJobIds.add(job.id().value());
-						pause(request.producerDelayMs());
+						try {
+							Job job = submitJobUseCase.handle("simulation", request.workerDelayMs());
+							submittedJobIds.add(job.id().value());
+						} catch (QueueFullException exception) {
+							rejectedCount.incrementAndGet();
+						}
+						pause(producerDelayMs);
 					}
 				} finally {
 					finishedProducers.countDown();
@@ -52,6 +72,8 @@ public class RunSimulationUseCase {
 		await(finishedProducers, Duration.ofSeconds(5));
 		producers.shutdownNow();
 		awaitTerminalJobs(new ArrayList<>(submittedJobIds), Duration.ofSeconds(10));
+		backlogSampler.stop();
+		double elapsedSeconds = Duration.ofNanos(System.nanoTime() - startedAt).toMillis() / 1000.0;
 
 		int successfulJobs = 0;
 		int failedJobs = 0;
@@ -64,7 +86,17 @@ public class RunSimulationUseCase {
 			}
 		}
 
-		return new SimulationResponse(totalJobs, successfulJobs, failedJobs, request.producerCount(), request.workerDelayMs());
+		return new SimulationResponse(
+			totalJobs,
+			successfulJobs,
+			failedJobs,
+			rejectedCount.get(),
+			request.producerCount(),
+			request.workerDelayMs(),
+			backlogSampler.maxBacklog(),
+			backlogSampler.averageBacklog(),
+			elapsedSeconds > 0 ? totalJobs / elapsedSeconds : 0
+		);
 	}
 
 	private void awaitTerminalJobs(List<String> submittedJobIds, Duration timeout) {
@@ -105,6 +137,48 @@ public class RunSimulationUseCase {
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			throw new IllegalStateException("Simulation was interrupted", exception);
+		}
+	}
+
+	private class BacklogSampler {
+
+		private final AtomicLong backlogSum = new AtomicLong();
+		private final AtomicInteger backlogSamples = new AtomicInteger();
+		private final AtomicInteger backlogMax = new AtomicInteger();
+		private Thread samplerThread;
+
+		void start() {
+			samplerThread = new Thread(this::sampleLoop);
+			samplerThread.setName("backlog-sampler");
+			samplerThread.setDaemon(true);
+			samplerThread.start();
+		}
+
+		void stop() {
+			samplerThread.interrupt();
+		}
+
+		int maxBacklog() {
+			return backlogMax.get();
+		}
+
+		double averageBacklog() {
+			int samples = backlogSamples.get();
+			return samples == 0 ? 0 : (double) backlogSum.get() / samples;
+		}
+
+		private void sampleLoop() {
+			try {
+				while (true) {
+					int depth = jobProcessingService.backlog();
+					backlogSum.addAndGet(depth);
+					backlogSamples.incrementAndGet();
+					backlogMax.updateAndGet(current -> Math.max(current, depth));
+					pause(10);
+				}
+			} catch (IllegalStateException ignored) {
+				Thread.currentThread().interrupt();
+			}
 		}
 	}
 }
