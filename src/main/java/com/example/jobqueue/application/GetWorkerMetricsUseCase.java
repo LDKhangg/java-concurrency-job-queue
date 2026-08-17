@@ -35,6 +35,6 @@ public class GetWorkerMetricsUseCase {
 			}
 		}
 
-		return new WorkerMetrics(pendingJobs, runningJobs, successfulJobs, failedJobs, jobProcessingService.workerCount());
+		return new WorkerMetrics(pendingJobs, runningJobs, successfulJobs, failedJobs, jobProcessingService.workerCount(), jobProcessingService.backlog());
 	}
 }

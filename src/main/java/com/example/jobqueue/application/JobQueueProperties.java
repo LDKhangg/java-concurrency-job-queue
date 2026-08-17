@@ -8,6 +8,9 @@ public record JobQueueProperties(
 	int defaultWorkerDelayMs,
 	int stepTimeoutMs,
 	int pipelineTimeoutMs,
-	int retryCount
+	int retryCount,
+	int queueCapacity,
+	RejectPolicy rejectPolicy,
+	int enqueueTimeoutMs
 ) {
 }

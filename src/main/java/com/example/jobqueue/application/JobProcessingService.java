@@ -7,11 +7,11 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,7 +21,7 @@ public class JobProcessingService {
 	private final InMemoryJobRepository jobRepository;
 	private final JobQueueProperties jobQueueProperties;
 	private final JobOrchestrationService jobOrchestrationService;
-	private final BlockingQueue<String> queue = new LinkedBlockingQueue<>();
+	private final BlockingQueue<String> queue;
 	private final AtomicInteger workerNumber = new AtomicInteger(1);
 
 	private volatile boolean running = true;
@@ -35,6 +35,7 @@ public class JobProcessingService {
 		this.jobRepository = jobRepository;
 		this.jobQueueProperties = jobQueueProperties;
 		this.jobOrchestrationService = jobOrchestrationService;
+		this.queue = new ArrayBlockingQueue<>(jobQueueProperties.queueCapacity());
 	}
 
 	@PostConstruct
@@ -52,11 +53,34 @@ public class JobProcessingService {
 	}
 
 	public void enqueue(Job job) {
-		queue.offer(job.id().value());
+		String jobId = job.id().value();
+		boolean accepted = switch (jobQueueProperties.rejectPolicy()) {
+			case FAIL_FAST -> queue.offer(jobId);
+			case BLOCK -> offerWithTimeout(jobId);
+		};
+
+		if (!accepted) {
+			throw new QueueFullException(
+				"Queue is full (capacity " + jobQueueProperties.queueCapacity() + "), job " + jobId + " stays PENDING"
+			);
+		}
+	}
+
+	private boolean offerWithTimeout(String jobId) {
+		try {
+			return queue.offer(jobId, jobQueueProperties.enqueueTimeoutMs(), TimeUnit.MILLISECONDS);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			throw new QueueFullException("Interrupted while waiting for queue space", exception);
+		}
 	}
 
 	public int workerCount() {
 		return jobQueueProperties.workerCount();
+	}
+
+	public int backlog() {
+		return queue.size();
 	}
 
 	@PreDestroy
@@ -66,10 +90,14 @@ public class JobProcessingService {
 			return;
 		}
 
-		workerPool.shutdownNow();
+		workerPool.shutdown();
 		try {
-			workerPool.awaitTermination(5, TimeUnit.SECONDS);
+			if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+				workerPool.shutdownNow();
+				workerPool.awaitTermination(5, TimeUnit.SECONDS);
+			}
 		} catch (InterruptedException exception) {
+			workerPool.shutdownNow();
 			Thread.currentThread().interrupt();
 		}
 	}
