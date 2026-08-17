@@ -5,7 +5,6 @@ public record WorkerMetrics(
 	int runningJobs,
 	int successfulJobs,
 	int failedJobs,
-	int workerCount,
-	int queueDepth
+	int workerCount
 ) {
 }

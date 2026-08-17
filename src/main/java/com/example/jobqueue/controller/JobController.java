@@ -32,9 +32,7 @@ public class JobController {
 	@ResponseStatus(HttpStatus.CREATED)
 	public CreateJobResponse createJob(@RequestBody(required = false) CreateJobRequest request) {
 		String jobType = request == null || request.type() == null || request.type().isBlank() ? "demo-job" : request.type();
-		int priority = request == null || request.priority() == null ? Job.DEFAULT_PRIORITY : request.priority();
-		int delayMs = request == null || request.delayMs() == null ? 0 : request.delayMs();
-		Job job = submitJobUseCase.handle(jobType, priority, delayMs);
+		Job job = submitJobUseCase.handle(jobType);
 		return new CreateJobResponse(job.id().value(), job.status().name());
 	}
 
@@ -42,14 +40,6 @@ public class JobController {
 	public JobResponse getJob(@PathVariable String jobId) {
 		Job job = getJobStatusUseCase.handle(jobId)
 			.orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Job not found"));
-		return new JobResponse(
-			job.id().value(),
-			job.type(),
-			job.status().name(),
-			job.result().errorMessage(),
-			job.priority(),
-			job.delayMs(),
-			job.createdAt()
-		);
+		return new JobResponse(job.id().value(), job.type(), job.status().name(), job.result().errorMessage(), job.createdAt());
 	}
 }

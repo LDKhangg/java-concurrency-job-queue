@@ -1,4 +1,4 @@
 package com.example.jobqueue.controller.dto;
 
-public record CreateJobRequest(String type, Integer priority, Integer delayMs) {
+public record CreateJobRequest(String type) {
 }

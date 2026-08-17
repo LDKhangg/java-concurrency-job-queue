@@ -4,7 +4,6 @@ public record SimulationRequest(
 	int producerCount,
 	int jobsPerProducer,
 	int producerDelayMs,
-	int workerDelayMs,
-	SimulationMode mode
+	int workerDelayMs
 ) {
 }

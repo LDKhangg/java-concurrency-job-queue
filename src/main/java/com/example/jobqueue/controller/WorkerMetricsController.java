@@ -25,8 +25,7 @@ public class WorkerMetricsController {
 			metrics.runningJobs(),
 			metrics.successfulJobs(),
 			metrics.failedJobs(),
-			metrics.workerCount(),
-			metrics.queueDepth()
+			metrics.workerCount()
 		);
 	}
 }

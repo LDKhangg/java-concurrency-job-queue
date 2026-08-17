@@ -7,8 +7,6 @@ public record JobResponse(
 	String type,
 	String status,
 	String errorMessage,
-	int priority,
-	int delayMs,
 	Instant createdAt
 ) {
 }

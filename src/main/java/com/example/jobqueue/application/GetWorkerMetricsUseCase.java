@@ -10,11 +10,9 @@ import org.springframework.stereotype.Service;
 public class GetWorkerMetricsUseCase {
 
 	private final InMemoryJobRepository jobRepository;
-	private final JobProcessingService jobProcessingService;
 
-	public GetWorkerMetricsUseCase(InMemoryJobRepository jobRepository, JobProcessingService jobProcessingService) {
+	public GetWorkerMetricsUseCase(InMemoryJobRepository jobRepository) {
 		this.jobRepository = jobRepository;
-		this.jobProcessingService = jobProcessingService;
 	}
 
 	public WorkerMetrics handle() {
@@ -35,6 +33,6 @@ public class GetWorkerMetricsUseCase {
 			}
 		}
 
-		return new WorkerMetrics(pendingJobs, runningJobs, successfulJobs, failedJobs, jobProcessingService.workerCount(), jobProcessingService.backlog());
+		return new WorkerMetrics(pendingJobs, runningJobs, successfulJobs, failedJobs, 0);
 	}
 }
