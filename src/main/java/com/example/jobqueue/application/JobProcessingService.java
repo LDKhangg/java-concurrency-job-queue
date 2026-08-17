@@ -7,13 +7,16 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
+import java.util.Comparator;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.DelayQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class JobProcessingService {
@@ -21,10 +24,14 @@ public class JobProcessingService {
 	private final InMemoryJobRepository jobRepository;
 	private final JobQueueProperties jobQueueProperties;
 	private final JobOrchestrationService jobOrchestrationService;
-	private final BlockingQueue<String> queue;
+	private final DelayQueue<ScheduledJobEntry> scheduledQueue = new DelayQueue<>();
+	private final PriorityBlockingQueue<ReadyJobEntry> readyQueue;
+	private final Semaphore readySlots;
+	private final AtomicLong sequence = new AtomicLong();
 	private final AtomicInteger workerNumber = new AtomicInteger(1);
 
 	private volatile boolean running = true;
+	private Thread dispatcherThread;
 	private ExecutorService workerPool;
 
 	public JobProcessingService(
@@ -35,11 +42,16 @@ public class JobProcessingService {
 		this.jobRepository = jobRepository;
 		this.jobQueueProperties = jobQueueProperties;
 		this.jobOrchestrationService = jobOrchestrationService;
-		this.queue = new ArrayBlockingQueue<>(jobQueueProperties.queueCapacity());
+		this.readyQueue = new PriorityBlockingQueue<>(jobQueueProperties.queueCapacity(), Comparator.naturalOrder());
+		this.readySlots = new Semaphore(jobQueueProperties.queueCapacity());
 	}
 
 	@PostConstruct
 	public void startWorkers() {
+		dispatcherThread = new Thread(this::runDispatcherLoop, "job-scheduler");
+		dispatcherThread.setDaemon(true);
+		dispatcherThread.start();
+
 		workerPool = Executors.newFixedThreadPool(jobQueueProperties.workerCount(), runnable -> {
 			Thread thread = new Thread(runnable);
 			thread.setName("job-worker-" + workerNumber.getAndIncrement());
@@ -54,21 +66,35 @@ public class JobProcessingService {
 
 	public void enqueue(Job job) {
 		String jobId = job.id().value();
-		boolean accepted = switch (jobQueueProperties.rejectPolicy()) {
-			case FAIL_FAST -> queue.offer(jobId);
-			case BLOCK -> offerWithTimeout(jobId);
-		};
+		long jobSequence = sequence.incrementAndGet();
 
-		if (!accepted) {
+		if (job.delayMs() > 0) {
+			scheduledQueue.offer(ScheduledJobEntry.of(job, jobSequence));
+			return;
+		}
+
+		if (!acquireReadySlot(jobId, job.priority(), jobSequence)) {
 			throw new QueueFullException(
 				"Queue is full (capacity " + jobQueueProperties.queueCapacity() + "), job " + jobId + " stays PENDING"
 			);
 		}
 	}
 
-	private boolean offerWithTimeout(String jobId) {
+	private boolean acquireReadySlot(String jobId, int priority, long jobSequence) {
+		boolean slotAcquired = switch (jobQueueProperties.rejectPolicy()) {
+			case FAIL_FAST -> readySlots.tryAcquire();
+			case BLOCK -> waitForSlot();
+		};
+
+		if (slotAcquired) {
+			readyQueue.offer(new ReadyJobEntry(jobId, priority, jobSequence));
+		}
+		return slotAcquired;
+	}
+
+	private boolean waitForSlot() {
 		try {
-			return queue.offer(jobId, jobQueueProperties.enqueueTimeoutMs(), TimeUnit.MILLISECONDS);
+			return readySlots.tryAcquire(jobQueueProperties.enqueueTimeoutMs(), TimeUnit.MILLISECONDS);
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			throw new QueueFullException("Interrupted while waiting for queue space", exception);
@@ -80,12 +106,15 @@ public class JobProcessingService {
 	}
 
 	public int backlog() {
-		return queue.size();
+		return readyQueue.size();
 	}
 
 	@PreDestroy
 	public void stopWorkers() {
 		running = false;
+		if (dispatcherThread != null) {
+			dispatcherThread.interrupt();
+		}
 		if (workerPool == null) {
 			return;
 		}
@@ -102,15 +131,33 @@ public class JobProcessingService {
 		}
 	}
 
-	private void runWorkerLoop() {
-		while (running || !queue.isEmpty()) {
+	private void runDispatcherLoop() {
+		while (running || !scheduledQueue.isEmpty()) {
 			try {
-				String jobId = queue.poll(200, TimeUnit.MILLISECONDS);
-				if (jobId == null) {
+				ScheduledJobEntry entry = scheduledQueue.poll(200, TimeUnit.MILLISECONDS);
+				if (entry == null) {
 					continue;
 				}
 
-				processJob(new JobId(jobId));
+				readySlots.acquire();
+				readyQueue.offer(new ReadyJobEntry(entry.jobId(), entry.priority(), entry.sequence()));
+			} catch (InterruptedException exception) {
+				Thread.currentThread().interrupt();
+				return;
+			}
+		}
+	}
+
+	private void runWorkerLoop() {
+		while (running || !readyQueue.isEmpty()) {
+			try {
+				ReadyJobEntry entry = readyQueue.poll(200, TimeUnit.MILLISECONDS);
+				if (entry == null) {
+					continue;
+				}
+
+				readySlots.release();
+				processJob(new JobId(entry.jobId()));
 			} catch (InterruptedException exception) {
 				Thread.currentThread().interrupt();
 				return;
