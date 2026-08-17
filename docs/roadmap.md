@@ -6,7 +6,7 @@
 - [x] Phase 2: In-memory queue + fixed worker pool
 - [x] Phase 3: CompletableFuture orchestration
 - [x] Phase 4: Backpressure & bounded queue
-- [ ] Phase 5: Scheduling & priority
+- [x] Phase 5: Scheduling & priority
 - [ ] Phase 6: Virtual threads & structured concurrency
 - [ ] Phase 7: Observability
 - [ ] Phase 8 (stretch): Persistence & crash recovery
@@ -74,11 +74,22 @@ Goal: them kha nang hoan thi job theo thoi gian va theo do uu tien.
 
 Issue checklist:
 
-- [ ] Them `delayMs` vao `POST /jobs` de tao delayed job (dung `DelayQueue` cho workers).
-- [ ] Them `priority` vao `POST /jobs` de uu tien job quan trong hon (dung `PriorityBlockingQueue`).
-- [ ] Worker pool pull theo thu tu delay -> priority.
+- [x] Them `delayMs` vao `POST /jobs` de tao delayed job (dung `DelayQueue` cho workers).
+- [x] Them `priority` vao `POST /jobs` de uu tien job quan trong hon (dung `PriorityBlockingQueue`).
+- [x] Worker pool pull theo thu tu delay -> priority.
 - [ ] Metrics cho delayed job dang cho va priority distribution.
-- [ ] Test: delayed job khong chay truoc deadline, priority job chay truoc.
+- [x] Test: delayed job khong chay truoc deadline, priority job chay truoc.
+
+Bai hoc chinh:
+
+- `DelayQueue` = queue ma phan tu chi "chin" sau mot khoang thoi gian, dispatcher
+  chuyen job het han sang queue san sang.
+- `PriorityBlockingQueue` = queue co thu tu, higher priority duoc pull truoc,
+  kem sequence number de giu FIFO giua cac job cung priority.
+- Delayed job khong bi reject khi ready queue day: chung cho o scheduled queue,
+  dispatcher se backpressure khi chuyen sang ready queue.
+- Ket hop hai queue: mot `DelayQueue` (staging) + mot bounded `PriorityBlockingQueue`
+  (san sang) la mo hinh scheduler co ban cua cac job queue that su.
 
 ## Phase 6: Virtual Threads & Structured Concurrency
 
