@@ -27,7 +27,15 @@ public class SubmitJobUseCase {
 	}
 
 	public Job handle(String jobType, int processingDelayMs) {
-		Job job = Job.pending(JobId.newId(), jobType, processingDelayMs);
+		return handle(jobType, processingDelayMs, Job.DEFAULT_PRIORITY, 0);
+	}
+
+	public Job handle(String jobType, int priority, int delayMs) {
+		return handle(jobType, jobQueueProperties.defaultWorkerDelayMs(), priority, delayMs);
+	}
+
+	public Job handle(String jobType, int processingDelayMs, int priority, int delayMs) {
+		Job job = Job.pending(JobId.newId(), jobType, processingDelayMs, priority, delayMs);
 		Job savedJob = jobRepository.save(job);
 		jobProcessingService.enqueue(savedJob);
 		return savedJob;
