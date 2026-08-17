@@ -5,7 +5,7 @@
 - [x] Phase 1: Race condition lab
 - [x] Phase 2: In-memory queue + fixed worker pool
 - [x] Phase 3: CompletableFuture orchestration
-- [ ] Phase 4: Backpressure & bounded queue
+- [x] Phase 4: Backpressure & bounded queue
 - [ ] Phase 5: Scheduling & priority
 - [ ] Phase 6: Virtual threads & structured concurrency
 - [ ] Phase 7: Observability
@@ -53,14 +53,14 @@ producer-consumer hoan chinh (burst, backlog, throughput, graceful shutdown).
 
 Issue checklist:
 
-- [ ] Doi `LinkedBlockingQueue` khong gioi han thanh bounded queue theo `app.job-queue.queue-capacity`.
-- [ ] Them `RejectPolicy` (`BLOCK`/`FAIL_FAST`): BLOCK cho producer cho den khi queue con cho,
+- [x] Doi `LinkedBlockingQueue` khong gioi han thanh bounded queue theo `app.job-queue.queue-capacity`.
+- [x] Them `RejectPolicy` (`BLOCK`/`FAIL_FAST`): BLOCK cho producer cho den khi queue con cho,
       FAIL_FAST nem `QueueFullException` de job nam lai `PENDING`.
-- [ ] Them config `app.job-queue.enqueue-timeout-ms` cho viec cho queue con cho.
-- [ ] Simulation them mode `BURST` (producer bom het toc do) de thay backpressure hoat dong.
-- [ ] Simulation do backlog (queue depth max/avg) va throughput (jobs/sec) trong report.
-- [ ] Graceful shutdown test: con pending job van duoc drain den terminal state.
-- [ ] Test bounded queue: capacity, block khi day, FAIL_FAST nem exception.
+- [x] Them config `app.job-queue.enqueue-timeout-ms` cho viec cho queue con cho.
+- [x] Simulation them mode `BURST` (producer bom het toc do) de thay backpressure hoat dong.
+- [x] Simulation do backlog (queue depth max/avg) va throughput (jobs/sec) trong report.
+- [x] Graceful shutdown test: con pending job van duoc drain den terminal state.
+- [x] Test bounded queue: capacity, block khi day, FAIL_FAST nem exception.
 
 Bai hoc chinh:
 

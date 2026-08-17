@@ -39,7 +39,7 @@ public class JobProcessingService {
 	}
 
 	@PostConstruct
-	void startWorkers() {
+	public void startWorkers() {
 		workerPool = Executors.newFixedThreadPool(jobQueueProperties.workerCount(), runnable -> {
 			Thread thread = new Thread(runnable);
 			thread.setName("job-worker-" + workerNumber.getAndIncrement());
@@ -84,7 +84,7 @@ public class JobProcessingService {
 	}
 
 	@PreDestroy
-	void stopWorkers() {
+	public void stopWorkers() {
 		running = false;
 		if (workerPool == null) {
 			return;
